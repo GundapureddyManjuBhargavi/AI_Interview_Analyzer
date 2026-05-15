@@ -1,190 +1,136 @@
 import streamlit as st
 from textblob import TextBlob
-import plotly.express as px
 import pandas as pd
+import plotly.express as px
 
-# Page Settings
-st.set_page_config(
-    page_title="AI Interview Analyzer",
-    layout="centered"
-)
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(page_title="AI Interview Coach", layout="centered")
 
-# Title
-st.title("🎯 AI Interview Analyzer")
+# ---------------- FAKE DATABASE (SESSION STORAGE) ----------------
+if "users" not in st.session_state:
+    st.session_state.users = {}   # stores username:password
 
-# Sidebar
-st.sidebar.header("About Project")
-st.sidebar.write(
-    "This AI project analyzes interview answers using NLP "
-    "and generates confidence scores with analytics dashboard."
-)
+if "login_user" not in st.session_state:
+    st.session_state.login_user = None
 
-# Questions
-questions = [
-    "Tell me about yourself",
-    "Why do you want this job?",
-    "What are your strengths?"
-]
+if "history" not in st.session_state:
+    st.session_state.history = {}
 
-# Positive Keywords
-positive_words = [
-    "confident",
-    "hardworking",
-    "passionate",
-    "teamwork",
-    "leadership",
-    "problem solving",
-    "communication",
-    "dedicated",
-    "motivated",
-    "creative",
-    "analytical",
-    "technical",
-    "responsible",
-    "focused"
-]
+# ---------------- AUTH FUNCTIONS ----------------
+def signup(username, password):
+    if username in st.session_state.users:
+        return False, "User already exists"
+    st.session_state.users[username] = password
+    st.session_state.history[username] = []
+    return True, "Account created successfully"
 
-# Variables
-scores = []
-question_list = []
+def login(username, password):
+    if username in st.session_state.users and st.session_state.users[username] == password:
+        st.session_state.login_user = username
+        return True
+    return False
 
-answered = 0
+# ---------------- ANALYSIS ----------------
+def analyze(answer):
+    polarity = TextBlob(answer).sentiment.polarity
+    score = (polarity + 1) * 50
 
-# Progress Bar
-progress = st.progress(0)
-
-# Questions Loop
-for question in questions:
-
-    st.subheader(question)
-
-    answer = st.text_area(f"Answer for: {question}")
-
-    if answer:
-
-        answered += 1
-
-        # NLP Analysis
-        blob = TextBlob(answer)
-
-        sentiment = blob.sentiment.polarity
-
-        # Bonus Score
-        bonus = 0
-
-        for word in positive_words:
-            if word in answer.lower():
-                bonus += 0.1
-
-        sentiment += bonus
-
-        # Final Score
-        score = (sentiment + 1) * 50
-
-        scores.append(score)
-        question_list.append(question)
-
-        # Result Messages
-        if sentiment > 0.3:
-            st.success("✅ Positive and Confident Answer")
-
-        elif sentiment > 0:
-            st.info("🙂 Slightly Positive Answer")
-
-        elif sentiment > -0.2:
-            st.warning("⚠️ Neutral Answer")
-
-        else:
-            st.error("❌ Negative or Low Confidence Answer")
-
-    progress.progress(answered / len(questions))
-
-# Final Report
-if st.button("Generate Final Report"):
-
-    average_score = sum(scores) / len(scores)
-
-    st.header("📊 Final Interview Report")
-
-    st.write(f"Final Score: {average_score:.2f}/100")
-
-    # Performance Message
-    if average_score > 75:
-
-        st.success("🌟 Excellent Interview Performance")
-
-    elif average_score > 50:
-
-        st.warning("👍 Good Performance, Needs Improvement")
-
+    if score >= 75:
+        label = "Excellent 🚀"
+    elif score >= 60:
+        label = "Good 👍"
+    elif score >= 40:
+        label = "Average ⚠️"
     else:
+        label = "Needs Improvement ❌"
 
-        st.error("⚠️ Low Confidence Performance")
+    return score, label
 
-    # AI Feedback
-    st.subheader("🤖 AI HR Feedback")
+# ---------------- LOGIN PAGE ----------------
+def auth_page():
+    st.title("🔐 AI Interview Coach")
 
-    if average_score > 75:
+    option = st.radio("Choose option", ["Login", "Signup"])
 
-        st.write("""
-        ✔ Strong communication skills  
-        ✔ Excellent confidence level  
-        ✔ Professional interview responses  
-        ✔ Strong technical mindset  
-        """)
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
-    elif average_score > 50:
+    if option == "Signup":
+        if st.button("Create Account"):
+            ok, msg = signup(username, password)
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
 
-        st.write("""
-        ✔ Good communication skills  
-        ✔ Positive attitude detected  
-        ✔ Improve confidence slightly  
-        ✔ Add more technical details  
-        """)
+    if option == "Login":
+        if st.button("Login"):
+            if login(username, password):
+                st.success("Login successful!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
 
-    else:
+# ---------------- MAIN APP ----------------
+def main_app():
 
-        st.write("""
-        ✔ Needs confidence improvement  
-        ✔ Practice interview communication  
-        ✔ Improve technical explanation skills  
-        """)
+    st.title("🤖 AI Interview Coach (Pro Version)")
+    st.caption(f"Welcome {st.session_state.login_user}")
 
-    # Create DataFrame
-    df = pd.DataFrame({
-        "Question": question_list,
-        "Score": scores
-    })
+    questions = [
+        "Tell me about yourself",
+        "Why do you want this job?",
+        "What are your strengths?"
+    ]
 
-    # Bar Chart
-    st.subheader("📈 Question-wise Performance")
+    if st.button("Logout"):
+        st.session_state.login_user = None
+        st.rerun()
 
-    fig = px.bar(
-        df,
-        x="Question",
-        y="Score",
-        title="Interview Performance Analysis"
-    )
+    if st.session_state.login_user not in st.session_state.history:
+        st.session_state.history[st.session_state.login_user] = []
 
-    st.plotly_chart(fig)
+    scores = []
 
-    # Pie Chart
-    st.subheader("🥧 Performance Distribution")
+    st.markdown("---")
 
-    performance_data = pd.DataFrame({
-        "Category": ["Score", "Remaining"],
-        "Value": [average_score, 100 - average_score]
-    })
+    for q in questions:
+        st.subheader(q)
+        ans = st.text_area("Your Answer", key=q)
 
-    pie_chart = px.pie(
-        performance_data,
-        names="Category",
-        values="Value",
-        title="Overall Interview Score"
-    )
+        if st.button(f"Submit {q}"):
+            if ans.strip():
+                score, label = analyze(ans)
 
-    st.plotly_chart(pie_chart)
+                st.success(label)
+                st.info(f"Score: {round(score,2)}")
 
-# Footer
-st.markdown("---")
-st.write("Developed using Python, Streamlit, NLP, Plotly and TextBlob")
+                st.session_state.history[st.session_state.login_user].append({
+                    "question": q,
+                    "answer": ans,
+                    "score": score
+                })
+
+    # ---------------- DASHBOARD ----------------
+    user_history = st.session_state.history[st.session_state.login_user]
+
+    if len(user_history) > 0:
+        st.markdown("---")
+        st.subheader("📊 Your Report")
+
+        df = pd.DataFrame(user_history)
+
+        final_score = df["score"].mean()
+
+        st.metric("Final Score", f"{final_score:.2f}/100")
+
+        st.bar_chart(df.set_index("question")["score"])
+
+        st.subheader("📜 History")
+        st.dataframe(df)
+
+# ---------------- FLOW ----------------
+if st.session_state.login_user is None:
+    auth_page()
+else:
+    main_app()
