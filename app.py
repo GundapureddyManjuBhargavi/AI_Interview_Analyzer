@@ -1,34 +1,58 @@
 import streamlit as st
+import sqlite3
+import hashlib
 from textblob import TextBlob
 import pandas as pd
-import plotly.express as px
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(page_title="AI Interview Coach", layout="centered")
+# ---------------- DATABASE ----------------
+conn = sqlite3.connect("users.db", check_same_thread=False)
+c = conn.cursor()
 
-# ---------------- FAKE DATABASE (SESSION STORAGE) ----------------
-if "users" not in st.session_state:
-    st.session_state.users = {}   # stores username:password
+c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    password TEXT
+)
+""")
 
-if "login_user" not in st.session_state:
-    st.session_state.login_user = None
+c.execute("""
+CREATE TABLE IF NOT EXISTS history (
+    username TEXT,
+    question TEXT,
+    answer TEXT,
+    score REAL
+)
+""")
 
-if "history" not in st.session_state:
-    st.session_state.history = {}
+conn.commit()
 
-# ---------------- AUTH FUNCTIONS ----------------
-def signup(username, password):
-    if username in st.session_state.users:
-        return False, "User already exists"
-    st.session_state.users[username] = password
-    st.session_state.history[username] = []
-    return True, "Account created successfully"
+# ---------------- HELPERS ----------------
+def hash_password(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
-def login(username, password):
-    if username in st.session_state.users and st.session_state.users[username] == password:
-        st.session_state.login_user = username
+def check_user(username, password):
+    c.execute("SELECT * FROM users WHERE username=? AND password=?",
+              (username, hash_password(password)))
+    return c.fetchone()
+
+def add_user(username, password):
+    try:
+        c.execute("INSERT INTO users VALUES (?,?)",
+                  (username, hash_password(password)))
+        conn.commit()
         return True
-    return False
+    except:
+        return False
+
+def save_history(username, q, a, score):
+    c.execute("INSERT INTO history VALUES (?,?,?,?)",
+              (username, q, a, score))
+    conn.commit()
+
+def get_history(username):
+    c.execute("SELECT question, answer, score FROM history WHERE username=?",
+              (username,))
+    return c.fetchall()
 
 # ---------------- ANALYSIS ----------------
 def analyze(answer):
@@ -46,36 +70,48 @@ def analyze(answer):
 
     return score, label
 
-# ---------------- LOGIN PAGE ----------------
-def auth_page():
-    st.title("🔐 AI Interview Coach")
+# ---------------- UI SETUP ----------------
+st.set_page_config(page_title="AI Interview SaaS", layout="centered")
 
-    option = st.radio("Choose option", ["Login", "Signup"])
+st.title("🤖 AI Interview SaaS Platform")
+st.caption("Professional Interview Practice System")
+
+# ---------------- SESSION ----------------
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+# ---------------- AUTH PAGE ----------------
+def auth():
+    st.subheader("🔐 Login / Signup")
+
+    option = st.radio("Choose", ["Login", "Signup"])
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if option == "Signup":
         if st.button("Create Account"):
-            ok, msg = signup(username, password)
-            if ok:
-                st.success(msg)
+            if add_user(username, password):
+                st.success("Account created! Please login.")
             else:
-                st.error(msg)
+                st.error("User already exists")
 
     if option == "Login":
         if st.button("Login"):
-            if login(username, password):
+            if check_user(username, password):
+                st.session_state.user = username
                 st.success("Login successful!")
                 st.rerun()
             else:
                 st.error("Invalid credentials")
 
 # ---------------- MAIN APP ----------------
-def main_app():
+def app():
+    st.sidebar.write(f"👤 Logged in as: {st.session_state.user}")
 
-    st.title("🤖 AI Interview Coach (Pro Version)")
-    st.caption(f"Welcome {st.session_state.login_user}")
+    if st.sidebar.button("Logout"):
+        st.session_state.user = None
+        st.rerun()
 
     questions = [
         "Tell me about yourself",
@@ -83,54 +119,40 @@ def main_app():
         "What are your strengths?"
     ]
 
-    if st.button("Logout"):
-        st.session_state.login_user = None
-        st.rerun()
-
-    if st.session_state.login_user not in st.session_state.history:
-        st.session_state.history[st.session_state.login_user] = []
+    st.title("🧠 Interview Practice")
 
     scores = []
-
-    st.markdown("---")
 
     for q in questions:
         st.subheader(q)
         ans = st.text_area("Your Answer", key=q)
 
-        if st.button(f"Submit {q}"):
-            if ans.strip():
+        if st.button(f"Submit - {q}"):
+            if ans:
                 score, label = analyze(ans)
 
-                st.success(label)
-                st.info(f"Score: {round(score,2)}")
+                save_history(st.session_state.user, q, ans, score)
 
-                st.session_state.history[st.session_state.login_user].append({
-                    "question": q,
-                    "answer": ans,
-                    "score": score
-                })
+                st.success(label)
+                st.info(f"Score: {round(score,2)}/100")
 
     # ---------------- DASHBOARD ----------------
-    user_history = st.session_state.history[st.session_state.login_user]
+    data = get_history(st.session_state.user)
 
-    if len(user_history) > 0:
-        st.markdown("---")
-        st.subheader("📊 Your Report")
+    if data:
+        df = pd.DataFrame(data, columns=["Question", "Answer", "Score"])
 
-        df = pd.DataFrame(user_history)
+        st.subheader("📊 Your Performance Dashboard")
 
-        final_score = df["score"].mean()
+        st.metric("Average Score", round(df["Score"].mean(), 2))
 
-        st.metric("Final Score", f"{final_score:.2f}/100")
-
-        st.bar_chart(df.set_index("question")["score"])
+        st.bar_chart(df.set_index("Question")["Score"])
 
         st.subheader("📜 History")
         st.dataframe(df)
 
 # ---------------- FLOW ----------------
-if st.session_state.login_user is None:
-    auth_page()
+if st.session_state.user is None:
+    auth()
 else:
-    main_app()
+    app()
